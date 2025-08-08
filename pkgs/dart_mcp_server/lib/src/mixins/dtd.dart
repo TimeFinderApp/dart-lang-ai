@@ -158,6 +158,7 @@ base mixin DartToolingDaemonSupport
     // supported in profile mode).
     if (enableScreenshots) registerTool(screenshotTool, takeScreenshot);
     registerTool(hotReloadTool, hotReload);
+    registerTool(hotRestartTool, hotRestart);
     registerTool(getWidgetTreeTool, widgetTree);
     registerTool(getSelectedWidgetTool, selectedWidget);
     registerTool(setWidgetSelectionModeTool, _setWidgetSelectionMode);
@@ -416,6 +417,41 @@ base mixin DartToolingDaemonSupport
           content: [
             TextContent(
               text: 'Hot reload ${success ? 'succeeded' : 'failed'}.',
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// Performs a hot restart on the currently running app.
+  ///
+  /// If more than one debug session is active, then it just uses the first one.
+  ///
+  // TODO: support passing a debug session id when there is more than one debug
+  // session.
+  Future<CallToolResult> hotRestart(CallToolRequest request) async {
+    return _callOnVmService(
+      callback: (vmService) async {
+        if (request.arguments?['clearRuntimeErrors'] == true) {
+          (await _AppListener.forVmService(vmService, this)).errorLog.clear();
+        }
+
+        final vm = await vmService.getVM();
+        final isolateId = vm.isolates!.first.id!;
+        
+        // Use force: true to trigger a full restart instead of just reload
+        final report = await vmService.reloadSources(
+          isolateId,
+          force: true,
+        );
+        
+        final success = report.success == true;
+        return CallToolResult(
+          isError: !success ? true : null,
+          content: [
+            TextContent(
+              text: 'Hot restart ${success ? 'succeeded' : 'failed'}.',
             ),
           ],
         );
@@ -923,6 +959,28 @@ base mixin DartToolingDaemonSupport
       properties: {
         'clearRuntimeErrors': Schema.bool(
           title: 'Whether to clear runtime errors before hot reloading.',
+          description:
+              'This is useful to clear out old errors that may no longer be '
+              'relevant.',
+        ),
+      },
+      required: [],
+    ),
+  );
+
+  @visibleForTesting
+  static final hotRestartTool = Tool(
+    name: 'hot_restart',
+    description:
+        'Performs a hot restart of the active Flutter application. '
+        'This completely restarts the application from main(), resetting all '
+        'state. Requires "${connectTool.name}" to be successfully called '
+        'first.',
+    annotations: ToolAnnotations(title: 'Hot restart', destructiveHint: true),
+    inputSchema: Schema.object(
+      properties: {
+        'clearRuntimeErrors': Schema.bool(
+          title: 'Whether to clear runtime errors before hot restarting.',
           description:
               'This is useful to clear out old errors that may no longer be '
               'relevant.',
